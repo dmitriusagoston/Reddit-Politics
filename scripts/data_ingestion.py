@@ -80,12 +80,12 @@ def fetch_top_posts(subreddit, retries=10):
 
             first_run = True
 
-            for submission in subreddit_obj.top(limit=5000):
+            for submission in subreddit_obj.top(limit=10):
                 submission.comment_sort = 'top'
                 submission.comments.replace_more(limit=1)
                 submission_data = []
 
-                for comment in submission.comments[:20]:
+                for comment in submission.comments[:5]:
                     comment_data = {
                         'subreddit': subreddit,
                         'id': submission.id,
@@ -125,7 +125,7 @@ def fetch_top_posts(subreddit, retries=10):
             break
 
 def main():
-    max_threads = 5  # Adjust this based on your system's capability
+    max_threads = 12  # Adjust this based on your system's capability
     with ThreadPoolExecutor(max_workers=max_threads) as executor:
         futures = {executor.submit(fetch_top_posts, subreddit): subreddit for subreddit in subreddits}
 
