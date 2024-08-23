@@ -1,13 +1,10 @@
 from dotenv import load_dotenv
 from prawcore.exceptions import ResponseException
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import current_timestamp
 import os
 import praw
-import time
 import logging
-import csv
-import threading
-import traceback
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, filename='reddit_scraper.log', 
@@ -31,6 +28,11 @@ reddit = praw.Reddit(
     user_agent= user_agent
 )
 
+# Create a Spark session
+spark = SparkSession.builder \
+    .appName("Reddit Data Ingestion") \
+    .getOrCreate()
+
 # for submission in reddit.subreddit('all').hot(limit=10):
 #     print(submission.title)
 
@@ -43,22 +45,58 @@ subreddits = [reddit.subreddit('politics'),
               reddit.subreddit('Republican'),
               reddit.subreddit('progressive'),
               reddit.subreddit('socialism'),
-              reddit.subreddit('Anarchism'),
-              reddit.subreddit('Liberal'),
-              reddit.subreddit('neoliberal'),
-              reddit.subreddit('GreenParty'),
-              reddit.subreddit('NeutralPolitics'),
-              reddit.subreddit('conspiracy'),
-              reddit.subreddit('PoliticalHumor'),
-              reddit.subreddit('PoliticalDiscussion'),
-              reddit.subreddit('atheism'),
-              reddit.subreddit('Christianity')]
+              reddit.subreddit('Liberal')]
 
-for subreddit in subreddits:
-    print(subreddit.display_name)
+def fetch_subreddit_data(subreddit):
+    post_data = []
+    for post in subreddit.hot(limit=10):
+        if not post.stickied:
+            # check if post in database
+            # if not, add to post_data
+            if not post_exists(post.id):
+                post_data.append({
+                    'subreddit': post.subreddit.display_name,
+                    'post_id': post.id,
+                    'title': post.title,
+                    'score': post.score,
+                    'url': post.url,
+                    'num_comments': post.num_comments,
+                    'created_utc': post.created_utc,
+                    'fetch_timestamp': current_timestamp()
+                })
+    
+    # convert to PySpark DataFrame
+    df = spark.createDataFrame(post_data)
+
+    # save to Postgres
+    save_to_database(df, table_name=subreddit.display_name)
+
+def save_to_database(df, table_name):
+    jdbc_url = "jdbc:postgresql://localhost/reddit_scraper" # replace later, along with username and password
+    df.write \
+        .format("jdbc") \
+        .option("url", jdbc_url) \
+        .option("dbtable", table_name) \
+        .option("user", "postgres") \
+        .option("password", "password") \
+        .save()
+        
+def post_exists(post_id, table_name):
+    # check if post exists in database
+    return False
+    
+
 
 def main():
+    for subreddit in subreddits:
+        try:
+            fetch_subreddit_data(subreddit)
+        except ResponseException as e:
+            logging.error(f'Error fetching data from subreddit: {subreddit.display_name}')
+            logging.error(e)
+            continue
 
+    spark.stop()
 
 if __name__ == '__main__':
     main()
