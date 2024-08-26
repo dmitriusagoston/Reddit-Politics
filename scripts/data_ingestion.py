@@ -2,6 +2,8 @@ from dotenv import load_dotenv
 from prawcore.exceptions import ResponseException
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import current_timestamp
+from pyspark.sql import Row
+import pyspark.sql.functions as F
 import os
 import praw
 import logging
@@ -20,6 +22,8 @@ load_dotenv(dotenv_path=env_path)
 client_id = os.getenv('client_id')
 client_secret = os.getenv('client_secret')
 user_agent = os.getenv('user_agent')
+db_user = os.getenv('db_user')
+db_pass = os.getenv('db_pass')
 
 # create a Reddit instance
 reddit = praw.Reddit(
@@ -31,6 +35,7 @@ reddit = praw.Reddit(
 # Create a Spark session
 spark = SparkSession.builder \
     .appName("Reddit Data Ingestion") \
+    .config("spark.jars.packages", "org.postgresql:postgresql:42.2.18") \
     .getOrCreate()
 
 # for submission in reddit.subreddit('all').hot(limit=10):
@@ -48,38 +53,49 @@ subreddits = [reddit.subreddit('politics'),
               reddit.subreddit('Liberal')]
 
 def fetch_subreddit_data(subreddit):
-    post_data = []
+    posts = []
+    comments = []
     for post in subreddit.hot(limit=10):
         if not post.stickied:
             # check if post in database
             # if not, add to post_data
-            if not post_exists(post.id):
-                post_data.append({
-                    'subreddit': post.subreddit.display_name,
-                    'post_id': post.id,
-                    'title': post.title,
-                    'score': post.score,
-                    'url': post.url,
-                    'num_comments': post.num_comments,
-                    'created_utc': post.created_utc,
-                    'fetch_timestamp': current_timestamp()
-                })
-    
-    # convert to PySpark DataFrame
-    df = spark.createDataFrame(post_data)
+            if not post_exists(post.id, subreddit.display_name + '_posts'):
+                post_data = Row(
+                    post_id = post.id,
+                    subreddit = post.subreddit.display_name,
+                    title = post.title,
+                    score = post.score,
+                    url = post.url,
+                    created_at = post.created_utc
+                )
+                posts.append(post_data)
 
-    # save to Postgres
-    save_to_database(df, table_name=subreddit.display_name)
+                # get comments
+                post.comments.replace_more(limit=0)
+                for comment in post.comments.list():
+                    comment_data = Row(
+                        comment_id = comment.id,
+                        post_id = post.id,
+                        comment_body = comment.body,
+                        comment_score = comment.score,
+                        comment_created_at = comment.created_utc
+                    )
+                    comments.append(comment_data)
+
+    return posts, comments
+
 
 def save_to_database(df, table_name):
-    jdbc_url = "jdbc:postgresql://localhost/reddit_scraper" # replace later, along with username and password
+    url = "jdbc:postgresql://database.c9ok422aid0k.us-west-1.rds.amazonaws.com:5432/postgres"
     df.write \
-        .format("jdbc") \
-        .option("url", jdbc_url) \
-        .option("dbtable", table_name) \
-        .option("user", "postgres") \
-        .option("password", "password") \
-        .save()
+      .format("jdbc") \
+      .option("url", url) \
+      .option("dbtable", table_name) \
+      .option("user", db_user) \
+      .option("password", db_pass) \
+      .option("driver", "org.postgresql.Driver") \
+      .mode("append") \
+      .save()
         
 def post_exists(post_id, table_name):
     # check if post exists in database
@@ -90,7 +106,11 @@ def post_exists(post_id, table_name):
 def main():
     for subreddit in subreddits:
         try:
-            fetch_subreddit_data(subreddit)
+            posts, comments = fetch_subreddit_data(subreddit)
+            posts_df = spark.createDataFrame(posts)
+            comments_df = spark.createDataFrame(comments)
+            save_to_database(posts_df, subreddit.display_name + '_posts')
+            save_to_database(comments_df, subreddit.display_name + '_comments')
         except ResponseException as e:
             logging.error(f'Error fetching data from subreddit: {subreddit.display_name}')
             logging.error(e)
