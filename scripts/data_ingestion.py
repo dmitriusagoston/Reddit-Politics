@@ -7,6 +7,7 @@ import pyspark.sql.functions as F
 import os
 import praw
 import logging
+import psycopg2
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, filename='reddit_scraper.log', 
@@ -97,20 +98,42 @@ def save_to_database(df, table_name):
       .mode("append") \
       .save()
         
+def save_to_local(df, file_path):
+    try:
+        df.write.csv(file_path, mode='overwrite', header=True)
+        return True
+    except Exception as e:
+        logging.error(e)
+        return False
+
 def post_exists(post_id, table_name):
     # check if post exists in database
     return False
     
+def drop_table(table_name):
+    conn = psycopg2.connect(
+        host='database.c9ok422aid0k.us-west-1.rds.amazonaws.com',
+        database='postgres',
+        user=db_user,
+        password=db_pass
+    )
+    cur = conn.cursor()
+    cur.execute(f"DROP TABLE IF EXISTS {table_name}")
+    conn.commit()
+    cur.close()
+    conn.close()
 
 
 def main():
     for subreddit in subreddits:
         try:
             posts, comments = fetch_subreddit_data(subreddit)
-            posts_df = spark.createDataFrame(posts)
-            comments_df = spark.createDataFrame(comments)
-            save_to_database(posts_df, subreddit.display_name + '_posts')
-            save_to_database(comments_df, subreddit.display_name + '_comments')
+            # posts_df = spark.createDataFrame(posts)
+            # comments_df = spark.createDataFrame(comments)
+            # save_to_database(posts_df, subreddit.display_name + '_posts')
+            # save_to_database(comments_df, subreddit.display_name + '_comments')
+            drop_table(subreddit.display_name + '_posts')
+            drop_table(subreddit.display_name + '_comments')  
         except ResponseException as e:
             logging.error(f'Error fetching data from subreddit: {subreddit.display_name}')
             logging.error(e)

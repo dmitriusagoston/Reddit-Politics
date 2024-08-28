@@ -1,17 +1,18 @@
-import csv
-import os
+import pandas as pd
+import numpy as np
+import re
+from nltk.stem import WordNetLemmatizer
 
-def count_csv_rows(filename):
-    with open(filename, 'r', newline='', encoding='utf-8') as f:
-        reader = csv.reader(f)
-        return sum(1 for row in reader)
-    
-def process_csv_files(folder_path):
-    for file in os.listdir(folder_path):
-        if file.endswith('.csv'):
-            filename = os.path.join(folder_path, file)
-            num_rows = count_csv_rows(filename)
-            print(f'{file}: {num_rows} rows')
+def clean_text(text):
+    text = text.lower()
+    text = re.sub(r"http\S+|www\S+|https\S+", '', text)  # Remove URLs
+    text = re.sub(r'[^A-Za-z\s]', '', text)  # Remove special characters
+    text = re.sub(r'\s+', ' ', text).strip()  # Remove extra spaces
+    return text
 
-folder_path = 'data/'
-process_csv_files(folder_path)
+def tokenize_text(text):
+    return text.split()
+
+def lemmatize_text(tokens):
+    lemmatizer = WordNetLemmatizer()
+    return [lemmatizer.lemmatize(token) for token in tokens]
