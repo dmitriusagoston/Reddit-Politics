@@ -108,7 +108,21 @@ def save_to_local(df, file_path):
 
 def post_exists(post_id, table_name):
     # check if post exists in database
-    return False
+    conn = psycopg2.connect(
+        host='database.c9ok422aid0k.us-west-1.rds.amazonaws.com',
+        database='postgres',
+        user=db_user,
+        password=db_pass
+    )
+    cur = conn.cursor()
+    try:
+        cur.execute(f"SELECT * FROM {table_name} WHERE post_id = '{post_id}'")
+    except:
+        return False
+    result = cur.fetchone()
+    cur.close()
+    conn.close()
+    return result is not None
     
 def drop_table(table_name):
     conn = psycopg2.connect(
@@ -123,6 +137,17 @@ def drop_table(table_name):
     cur.close()
     conn.close()
 
+def fetch_from_database(table_name):
+    url = "jdbc:postgresql://database.c9ok422aid0k.us-west-1.rds.amazonaws.com:5432/postgres"
+    df = spark.read \
+        .format("jdbc") \
+        .option("url", url) \
+        .option("dbtable", table_name) \
+        .option("user", db_user) \
+        .option("password", db_pass) \
+        .option("driver", "org.postgresql.Driver") \
+        .load()
+    return df
 
 def main():
     for subreddit in subreddits:
@@ -132,8 +157,10 @@ def main():
             # comments_df = spark.createDataFrame(comments)
             # save_to_database(posts_df, subreddit.display_name + '_posts')
             # save_to_database(comments_df, subreddit.display_name + '_comments')
-            drop_table(subreddit.display_name + '_posts')
-            drop_table(subreddit.display_name + '_comments')  
+            print(subreddit.display_name + '_posts')
+            print(subreddit.display_name + '_comments')
+            # drop_table(subreddit.display_name + '_posts')
+            # drop_table(subreddit.display_name + '_comments')  
         except ResponseException as e:
             logging.error(f'Error fetching data from subreddit: {subreddit.display_name}')
             logging.error(e)
